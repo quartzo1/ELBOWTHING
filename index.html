@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>K‑Means Clustering Demo — Elbow Method</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #121821;
+      --accent: #6aa6ff;
+      --muted: #98a2b3;
+      --grid: #1c2531;
+      --good: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; padding: 24px;
+      background: radial-gradient(1200px 800px at 80% -10%, #0f1724 0, var(--bg) 60%);
+      color: #e5e7eb; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    h1 { margin: 0 0 8px; font-weight: 700; letter-spacing: 0.2px; }
+    .sub { color: var(--muted); margin-bottom: 18px; }
+    .app {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      grid-template-rows: auto auto 1fr;
+      gap: 16px;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border: 1px solid #1f2a37;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      padding: 14px 16px;
+    }
+    .controls { grid-column: 1; grid-row: 1 / span 2; position: sticky; top: 16px; align-self: start; }
+    .panel-title { font-weight: 600; margin: 4px 0 10px; }
+    .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; margin: 10px 0; }
+    .row label { color: var(--muted); font-size: 13px; }
+    .row .value { font-variant-numeric: tabular-nums; color: #d1d5db; }
+    .radios { display: grid; gap: 6px; margin: 8px 0 2px; }
+    .radios label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+    input[type="radio"] { accent-color: var(--accent); }
+    input[type="range"] { width: 100%; }
+    button {
+      background: linear-gradient(180deg, #1d4ed8, #1e40af);
+      color: white; border: 1px solid #2b3f73; border-radius: 10px;
+      padding: 10px 12px; cursor: pointer; font-weight: 600; letter-spacing: 0.2px;
+      transition: transform .05s ease, filter .15s ease;
+    }
+    button.secondary { background: linear-gradient(180deg, #374151, #1f2937); border-color: #374151; }
+    button:active { transform: translateY(1px); }
+    .plots { grid-column: 2; grid-row: 1 / span 2; display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .plot-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+    .plot-head .title { font-weight: 600; }
+    .plot-head .meta { color: var(--muted); font-size: 13px; }
+    canvas { width: 100%; height: 360px; border-radius: 12px; background: #0c131c; border: 1px solid #1f2a37; display: block; }
+    .cluster canvas { height: 460px; }
+    .metrics { grid-column: 2; }
+    .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .metric { background: #0c131c; border: 1px solid #1f2a37; border-radius: 12px; padding: 10px; }
+    .metric .label { color: var(--muted); font-size: 12px; }
+    .metric .num { font-size: 20px; font-weight: 700; margin-top: 4px; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+    .dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; margin-right: 6px; border: 1px solid rgba(255,255,255,0.5); }
+    .footer { grid-column: 1 / -1; color: var(--muted); font-size: 12px; text-align: center; margin-top: 12px; }
+    @media (max-width: 980px) {
+      .app { grid-template-columns: 1fr; }
+      .controls { position: relative; top: 0; }
+      .metrics .metric-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <h1>K‑Means Clustering Demo</h1>
+  <div class="sub">Elbow method with live, clickable K selection. Click a point on the elbow plot to view that clustering.</div>
+
+  <div class="app">
+    <!-- Controls -->
+    <div class="card controls">
+      <div class="panel-title">Data Generator</div>
+      <div class="radios">
+        <label><input type="radio" name="dist" value="blobs" checked /> Random blobs (clusterable)</label>
+        <label><input type="radio" name="dist" value="grid" /> Evenly distributed grid</label>
+      </div>
+      <div class="row">
+        <label for="nPoints">Points</label>
+        <div class="value" id="nPointsVal">400</div>
+      </div>
+      <input id="nPoints" type="range" min="60" max="1200" value="400" />
+
+      <div class="row">
+        <label for="kMax">Max K for elbow</label>
+        <div class="value" id="kMaxVal">10</div>
+      </div>
+      <input id="kMax" type="range" min="3" max="20" value="10" />
+
+      <div class="row" style="margin-top:14px; grid-template-columns: 1fr 1fr; gap:10px;">
+        <button id="regen">Regenerate Data</button>
+        <button class="secondary" id="pickElbow">Auto‑pick Elbow</button>
+      </div>
+      <div class="hint">Tip: “Random blobs” gives a clear elbow. Grid will look flatter.
+      </div>
+    </div>
+
+    <!-- Plots -->
+    <div class="plots">
+      <div class="card elbow">
+        <div class="plot-head">
+          <div class="title">Elbow Plot (SSE / Inertia)</div>
+          <div class="meta">Click a point to select K. Hover for details.</div>
+        </div>
+        <canvas id="elbowCanvas" width="1000" height="380" aria-label="Elbow Plot"></canvas>
+      </div>
+
+      <div class="card cluster">
+        <div class="plot-head">
+          <div class="title">Clustering</div>
+          <div class="meta" id="clusterMeta">K = 3</div>
+        </div>
+        <canvas id="clusterCanvas" width="1000" height="480" aria-label="Cluster Plot"></canvas>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="card metrics">
+      <div class="panel-title">Current Selection</div>
+      <div class="metric-grid">
+        <div class="metric"><div class="label">K (clusters)</div><div class="num" id="mK">3</div></div>
+        <div class="metric"><div class="label">SSE (Inertia)</div><div class="num" id="mSSE">—</div></div>
+        <div class="metric"><div class="label">Mean squared distance</div><div class="num" id="mMSD">—</div></div>
+        <div class="metric"><div class="label">Points</div><div class="num" id="mN">—</div></div>
+      </div>
+      <div class="hint">Inertia is the sum of squared distances from each point to its closest centroid. Mean squared distance = SSE ÷ N.</div>
+    </div>
+
+    <div class="footer">Built with plain HTML, CSS, and JavaScript. No libraries needed.</div>
+  </div>
+
+  <script>
+    // Utilities
+    const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    function resizeHiDPI(canvas) {
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.round(rect.width * DPR);
+      canvas.height = Math.round(rect.height * DPR);
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0); // draw in CSS pixels
+      return ctx;
+    }
+    function randn() { // Box-Muller
+      let u = 0, v = 0; while (u === 0) u = Math.random(); while (v === 0) v = Math.random();
+      return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+    function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
+    function fmt(x) { return x.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
+    function colorFor(i, k) {
+      const h = (i * (360 / k)) % 360; return `hsl(${h} 70% 60%)`;
+    }
+
+    // Data generation
+    function genBlobs(n) {
+      const clusters = Math.floor(3 + Math.random() * 4); // 3..6
+      const centers = Array.from({length: clusters}, () => ({
+        x: 0.15 + Math.random() * 0.7,
+        y: 0.15 + Math.random() * 0.7,
+        s: 0.02 + Math.random() * 0.05 // std dev per axis
+      }));
+      const pts = [];
+      for (let i = 0; i < n; i++) {
+        const c = centers[i % clusters];
+        const x = clamp(c.x + randn() * c.s, 0.02, 0.98);
+        const y = clamp(c.y + randn() * c.s, 0.02, 0.98);
+        pts.push({x, y});
+      }
+      return pts;
+    }
+    function genGrid(n) {
+      const side = Math.max(8, Math.round(Math.sqrt(n)));
+      const pts = [];
+      for (let i = 0; i < side; i++) {
+        for (let j = 0; j < side; j++) {
+          if (pts.length >= n) break;
+          const x = (i + 0.5) / side + (Math.random() - 0.5) * 0.003;
+          const y = (j + 0.5) / side + (Math.random() - 0.5) * 0.003;
+          pts.push({x, y});
+        }
+      }
+      return pts;
+    }
+
+    // K-Means with k-means++ init and small n_init
+    function kmeansPlusPlusInit(points, k) {
+      const n = points.length;
+      const centroids = [];
+      const first = points[Math.floor(Math.random() * n)];
+      centroids.push({x: first.x, y: first.y});
+      const d2 = new Array(n).fill(0);
+      for (let c = 1; c < k; c++) {
+        // compute D^2 to nearest centroid
+        for (let i = 0; i < n; i++) {
+          let minDist2 = Infinity;
+          for (let j = 0; j < centroids.length; j++) {
+            const dx = points[i].x - centroids[j].x;
+            const dy = points[i].y - centroids[j].y;
+            const dist2 = dx*dx + dy*dy;
+            if (dist2 < minDist2) minDist2 = dist2;
+          }
+          d2[i] = minDist2;
+        }
+        const sum = d2.reduce((a,b) => a+b, 0);
+        let r = Math.random() * sum;
+        let idx = 0;
+        while (idx < n && (r -= d2[idx]) > 0) idx++;
+        const p = points[Math.min(idx, n-1)];
+        centroids.push({x: p.x, y: p.y});
+      }
+      return centroids;
+    }
+
+    function kmeans(points, k, opts = {}) {
+      const maxIters = opts.maxIters || 100;
+      const nInit = opts.nInit || 3;
+      let best = null;
+      for (let attempt = 0; attempt < nInit; attempt++) {
+        let cents = kmeansPlusPlusInit(points, k);
+        let assign = new Array(points.length).fill(-1);
+        let changed = true;
+        let iters = 0;
+        while (changed && iters++ < maxIters) {
+          changed = false;
+          // assign
+          for (let i = 0; i < points.length; i++) {
+            let bestJ = 0, bestD = Infinity;
+            for (let j = 0; j < k; j++) {
+              const dx = points[i].x - cents[j].x;
+              const dy = points[i].y - cents[j].y;
+              const d = dx*dx + dy*dy;
+              if (d < bestD) { bestD = d; bestJ = j; }
+            }
+            if (assign[i] !== bestJ) { assign[i] = bestJ; changed = true; }
+          }
+          // update
+          const sx = new Array(k).fill(0);
+          const sy = new Array(k).fill(0);
+          const cnt = new Array(k).fill(0);
+          for (let i = 0; i < points.length; i++) {
+            const j = assign[i]; sx[j] += points[i].x; sy[j] += points[i].y; cnt[j]++;
+          }
+          for (let j = 0; j < k; j++) {
+            if (cnt[j] === 0) { // re-seed empty cluster
+              const p = points[Math.floor(Math.random() * points.length)];
+              cents[j] = {x: p.x, y: p.y};
+            } else {
+              cents[j] = {x: sx[j] / cnt[j], y: sy[j] / cnt[j]};
+            }
+          }
+        }
+        // compute inertia
+        let sse = 0;
+        for (let i = 0; i < points.length; i++) {
+          const j = assign[i];
+          const dx = points[i].x - cents[j].x;
+          const dy = points[i].y - cents[j].y;
+          sse += dx*dx + dy*dy;
+        }
+        const result = { centroids: cents, assign, sse, iters };
+        if (!best || result.sse < best.sse) best = result;
+      }
+      return best;
+    }
+
+    // Elbow picker using simple Kneedle variant
+    function autoPickElbow(kVals, sseVals) {
+      const K = kVals.length; if (K < 3) return kVals[0];
+      const kMin = kVals[0], kMax = kVals[K-1];
+      const sMin = Math.min(...sseVals), sMax = Math.max(...sseVals);
+      const xs = kVals.map(k => (k - kMin) / (kMax - kMin));
+      const ys = sseVals.map(s => (s - sMin) / (sMax - sMin));
+      // We look for the point with the largest distance above the straight line from (0,1) to (1,0)
+      let bestIdx = 0, bestDelta = -Infinity;
+      for (let i = 0; i < K; i++) {
+        const yLine = 1 - xs[i];
+        const delta = ys[i] - yLine;
+        if (delta > bestDelta) { bestDelta = delta; bestIdx = i; }
+      }
+      return kVals[bestIdx];
+    }
+
+    // Drawing helpers
+    function drawGrid(ctx, w, h, step = 40) {
+      ctx.save();
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+      ctx.lineWidth = 1;
+      for (let x = 0.5; x < w; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+      for (let y = 0.5; y < h; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+      ctx.restore();
+    }
+
+    // State
+    let points = [];
+    let results = []; // per K: {k, sse, centroids, assign}
+    let selectedK = 3;
+    let elbowHitboxes = []; // clickable regions per K
+
+    // Elements
+    const elbowCanvas = document.getElementById('elbowCanvas');
+    const clusterCanvas = document.getElementById('clusterCanvas');
+    const ctxElbow = resizeHiDPI(elbowCanvas);
+    const ctxClus = resizeHiDPI(clusterCanvas);
+
+    const nSlider = document.getElementById('nPoints');
+    const nVal = document.getElementById('nPointsVal');
+    const kMaxSlider = document.getElementById('kMax');
+    const kMaxVal = document.getElementById('kMaxVal');
+    const regenBtn = document.getElementById('regen');
+    const elbowBtn = document.getElementById('pickElbow');
+    const legendEl = document.getElementById('legend');
+
+    const mK = document.getElementById('mK');
+    const mSSE = document.getElementById('mSSE');
+    const mMSD = document.getElementById('mMSD');
+    const mN = document.getElementById('mN');
+    const clusterMeta = document.getElementById('clusterMeta');
+
+    function currentDistType() {
+      const v = document.querySelector('input[name="dist"]:checked').value;
+      return v;
+    }
+
+    function generateData() {
+      const n = parseInt(nSlider.value, 10);
+      points = (currentDistType() === 'grid') ? genGrid(n) : genBlobs(n);
+      mN.textContent = n.toString();
+    }
+
+    function computeAllKs() {
+      const kMax = Math.min(parseInt(kMaxSlider.value, 10), Math.max(2, points.length - 1));
+      const out = [];
+      for (let k = 1; k <= kMax; k++) {
+        const res = kmeans(points, k, { nInit: 3, maxIters: 100 });
+        out.push({ k, sse: res.sse, centroids: res.centroids, assign: res.assign });
+      }
+      results = out;
+    }
+
+    function drawElbow() {
+      resizeHiDPI(elbowCanvas);
+      const ctx = elbowCanvas.getContext('2d');
+      const w = elbowCanvas.clientWidth, h = elbowCanvas.clientHeight;
+      ctx.clearRect(0, 0, w, h);
+      drawGrid(ctx, w, h, 50);
+
+      const pad = { l: 50, r: 20, t: 20, b: 40 };
+      const plotW = w - pad.l - pad.r;
+      const plotH = h - pad.t - pad.b;
+
+      const ks = results.map(r => r.k);
+      const sses = results.map(r => r.sse);
+      const minS = Math.min(...sses);
+      const maxS = Math.max(...sses);
+      const xForK = k => pad.l + ( (k - ks[0]) / (ks[ks.length-1] - ks[0]) ) * plotW;
+      const yForS = s => pad.t + (1 - (s - minS) / (maxS - minS + 1e-9)) * plotH;
+
+      // axes
+      ctx.strokeStyle = '#7f8ea3';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t + plotH); ctx.lineTo(pad.l + plotW, pad.t + plotH); ctx.stroke();
+
+      // ticks
+      ctx.fillStyle = '#9fb3cc'; ctx.font = '12px system-ui';
+      for (let k of ks) {
+        const x = xForK(k);
+        ctx.beginPath(); ctx.moveTo(x, pad.t + plotH); ctx.lineTo(x, pad.t + plotH + 6); ctx.stroke();
+        ctx.fillText(k.toString(), x - 3, pad.t + plotH + 18);
+      }
+      const yTicks = 4;
+      for (let i = 0; i <= yTicks; i++) {
+        const s = minS + (i / yTicks) * (maxS - minS);
+        const y = yForS(s);
+        ctx.beginPath(); ctx.moveTo(pad.l - 6, y); ctx.lineTo(pad.l, y); ctx.stroke();
+        ctx.fillText(fmt(s), 8, y + 4);
+      }
+
+      // line
+      ctx.strokeStyle = '#6aa6ff'; ctx.lineWidth = 2.0; ctx.beginPath();
+      for (let i = 0; i < ks.length; i++) {
+        const x = xForK(ks[i]); const y = yForS(sses[i]);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // elbow recommendation
+      const elbowK = autoPickElbow(ks, sses);
+      const ex = xForK(elbowK), ey = yForS(sses[elbowK - ks[0]]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.setLineDash([6,4]);
+      ctx.beginPath(); ctx.moveTo(ex, pad.t); ctx.lineTo(ex, pad.t + plotH); ctx.stroke();
+      ctx.setLineDash([]);
+
+      // points with hover targets
+      elbowHitboxes = [];
+      for (let i = 0; i < ks.length; i++) {
+        const k = ks[i]; const s = sses[i];
+        const x = xForK(k); const y = yForS(s);
+        const r = (k === selectedK) ? 6 : 4;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = (k === selectedK) ? '#22c55e' : '#e5e7eb';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+        elbowHitboxes.push({ k, x, y, r: 8, s });
+      }
+
+      // labels
+      ctx.fillStyle = '#9fb3cc'; ctx.font = '12px system-ui';
+      ctx.fillText('K', pad.l + plotW - 8, pad.t + plotH + 28);
+      ctx.save(); ctx.translate(16, pad.t + 10); ctx.rotate(-Math.PI / 2); ctx.fillText('SSE / Inertia', 0, 0); ctx.restore();
+
+      // tooltip on hover
+      elbowCanvas.onmousemove = (e) => {
+        const rect = elbowCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left; const my = e.clientY - rect.top;
+        const hit = elbowHitboxes.find(h => (mx - h.x) ** 2 + (my - h.y) ** 2 <= (h.r * h.r));
+        drawElbow(); // clear previous tooltip by re-drawing
+        if (hit) {
+          // draw tooltip
+          const text = `K=${hit.k} | SSE=${fmt(hit.s)} | MSD=${fmt(hit.s / points.length)}`;
+          const padT = 8;
+          ctx.font = '12px system-ui';
+          const tw = ctx.measureText(text).width;
+          const tx = clamp(hit.x + 12, 8, w - tw - 12);
+          const ty = clamp(hit.y - 24, 12, h - 30);
+          ctx.fillStyle = 'rgba(12,19,28,0.95)';
+          ctx.strokeStyle = '#1f2a37';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(tx - padT, ty - padT, tw + padT * 2, 22 + padT, 8);
+          ctx.fill(); ctx.stroke();
+          ctx.fillStyle = '#e5e7eb'; ctx.fillText(text, tx, ty + 12);
+        }
+      };
+    }
+
+    function drawClusters() {
+      resizeHiDPI(clusterCanvas);
+      const ctx = clusterCanvas.getContext('2d');
+      const w = clusterCanvas.clientWidth, h = clusterCanvas.clientHeight;
+      ctx.clearRect(0, 0, w, h);
+      drawGrid(ctx, w, h, 50);
+
+      const res = results.find(r => r.k === selectedK) || results[0];
+      if (!res) return;
+
+      // draw points
+      const r = 3.0;
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        const j = res.assign[i];
+        ctx.beginPath();
+        ctx.arc(p.x * w, p.y * h, r, 0, Math.PI * 2);
+        ctx.fillStyle = colorFor(j, selectedK);
+        ctx.fill();
+      }
+
+      // draw centroids
+      for (let j = 0; j < res.centroids.length; j++) {
+        const c = res.centroids[j];
+        const cx = c.x * w, cy = c.y * h;
+        ctx.lineWidth = 2.2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx + 8, cy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, 9, 0, Math.PI * 2); ctx.stroke();
+      }
+
+      // legend
+      legendEl.innerHTML = '';
+      for (let j = 0; j < res.centroids.length; j++) {
+        const swatch = document.createElement('span');
+        swatch.className = 'dot'; swatch.style.background = colorFor(j, selectedK);
+        const label = document.createElement('span'); label.textContent = `Cluster ${j+1}`;
+        const block = document.createElement('div'); block.style.display = 'flex'; block.style.alignItems = 'center';
+        block.appendChild(swatch); block.appendChild(label);
+        legendEl.appendChild(block);
+      }
+
+      // metrics
+      const sse = res.sse; const msd = sse / points.length;
+      mK.textContent = selectedK.toString();
+      mSSE.textContent = fmt(sse);
+      mMSD.textContent = fmt(msd);
+      clusterMeta.textContent = `K = ${selectedK}`;
+    }
+
+    function recomputeAndRender() {
+      computeAllKs();
+      // default selection: auto elbow
+      selectedK = autoPickElbow(results.map(r => r.k), results.map(r => r.sse));
+      drawElbow();
+      drawClusters();
+    }
+
+    // Click to select K
+    elbowCanvas.addEventListener('click', (e) => {
+      const rect = elbowCanvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left; const my = e.clientY - rect.top;
+      const hit = elbowHitboxes.find(h => (mx - h.x) ** 2 + (my - h.y) ** 2 <= (h.r * h.r));
+      if (hit) {
+        selectedK = hit.k;
+        drawElbow();
+        drawClusters();
+      }
+    });
+
+    // UI events
+    nSlider.addEventListener('input', () => { nVal.textContent = nSlider.value; });
+    kMaxSlider.addEventListener('input', () => { kMaxVal.textContent = kMaxSlider.value; });
+
+    regenBtn.addEventListener('click', () => {
+      generateData();
+      recomputeAndRender();
+    });
+    elbowBtn.addEventListener('click', () => {
+      selectedK = autoPickElbow(results.map(r => r.k), results.map(r => r.sse));
+      drawElbow();
+      drawClusters();
+    });
+
+    document.querySelectorAll('input[name="dist"]').forEach(r => r.addEventListener('change', () => {
+      generateData();
+      recomputeAndRender();
+    }));
+
+    // Initial run
+    generateData();
+    recomputeAndRender();
+
+    // Resize handling
+    const ro = new ResizeObserver(() => { drawElbow(); drawClusters(); });
+    ro.observe(elbowCanvas); ro.observe(clusterCanvas);
+
+    // Polyfill for roundRect on older canvases
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+      CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (w < 2 * r) r = w / 2; if (h < 2 * r) r = h / 2;
+        this.beginPath();
+        this.moveTo(x + r, y);
+        this.arcTo(x + w, y, x + w, y + h, r);
+        this.arcTo(x + w, y + h, x, y + h, r);
+        this.arcTo(x, y + h, x, y, r);
+        this.arcTo(x, y, x + w, y, r);
+        this.closePath();
+        return this;
+      };
+    }
+  </script>
+</body>
+</html>
